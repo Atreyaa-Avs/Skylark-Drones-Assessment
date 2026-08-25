@@ -1,10 +1,10 @@
-# 📊 Founder BI Agent for monday.com
+# Founder BI Agent for monday.com
 
 A conversational Business Intelligence AI agent powered by **Chainlit** and **Groq** (default: `llama-3.3-70b-versatile`) with function-calling. It connects directly to live **monday.com** GraphQL APIs, seamlessly normalizes messy multi-lingual project & sales data, flags data-quality risks, and delivers strategic executive insights to founders at lightning speed.
 
 ---
 
-## 🌟 Key Features
+## Key Features
 
 1. **Live monday.com GraphQL API Integration**:
    - Direct HTTP queries against `https://api.monday.com/v2` (no CSV or static caching).
@@ -32,7 +32,7 @@ A conversational Business Intelligence AI agent powered by **Chainlit** and **Gr
 
 ---
 
-## 🏗️ Architecture Overview
+## Architecture Overview
 
 ```mermaid
 flowchart LR
@@ -50,7 +50,7 @@ flowchart LR
 
 ---
 
-## 🚀 Getting Started
+## Getting Started
 
 ### 1. Prerequisites
 - Python 3.10+ (Python 3.11 recommended)
@@ -103,7 +103,7 @@ GROQ_API_KEY=gsk_...
 
 ---
 
-## 🧪 Diagnostics & Validation
+## Diagnostics & Validation
 
 Run the diagnostic script to verify credentials, inspect board schemas, and test Groq API connectivity:
 ```bash
@@ -117,7 +117,7 @@ python -m pytest test_suite.py
 
 ---
 
-## 💻 Running the Web Application
+## Running the Web Application
 
 Start the Chainlit conversational interface with hot-reloading:
 ```bash
@@ -127,7 +127,7 @@ Open your browser at `http://localhost:8000`.
 
 ---
 
-## 💬 Sample Queries
+## Sample Queries
 
 - **Pipeline Analysis**: *"What is our total active pipeline across all sectors?"*
 - **Execution & Delivery**: *"How many work orders are delayed or at risk, and for which clients?"*
@@ -137,7 +137,7 @@ Open your browser at `http://localhost:8000`.
 
 ---
 
-## 🌐 Cloud Deployment
+## Cloud Deployment
 
 ### Deploy on Render (using `render.yaml`)
 1. Push this repository to GitHub.
@@ -153,7 +153,7 @@ docker run -p 8000:8000 --env-file .env monday-bi-agent
 
 ---
 
-## 📂 Project Structure
+## Project Structure
 
 ```
 ├── app.py               # Chainlit web application & session management
