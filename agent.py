@@ -58,6 +58,7 @@ Your primary role is to answer strategic, operational, and financial questions b
    - "revenue" → clarify if ambiguous (could mean closed deal value, invoiced amount, or collected amount); if the context implies sales pipeline use deal value, if fulfillment use billed/collected.
    - "sector" → `Sector/service` or `Sector`
    - Time ranges like "this quarter" without a year default to the current calendar quarter with the assumption stated.
+   - Specific client/deal/company inquiries (e.g. 'What is the closure probability of a company ?') → Call `fetch_deals` with `search_query='Sakura'` or `search_query='company047'` to look up the exact deal record and attributes.
 4. **Contextual Data Quality Caveats**:
    - Whenever you calculate metrics touching a field with >10% nulls or known unreliability, ALWAYS mention that caveat inline in the response (not just as a generic disclaimer).
    - `Collection status` is **100% empty / untracked** across all work orders. If asked about collection status, explicitly state it is not currently tracked by operations rather than returning 0.
@@ -72,10 +73,14 @@ TOOLS_SCHEMA = [
         "type": "function",
         "function": {
             "name": "fetch_deals",
-            "description": "Fetches and analyzes live sales deals from the Deals board (Deal_funnel_Data), returning pipeline values, win rate, stage funnel distribution, sector breakdown, and data caveats.",
+            "description": "Fetches and analyzes live sales deals from the Deals board (Deal_funnel_Data). Supports searching specific deals/clients (e.g. 'Sakura', 'company047') or filtering by sector, status, or stage. Returns pipeline metrics, win rate, stage funnel, individual matching deal records (with Closure Probability, Deal Value, Deal Stage, Deal Status, Client Code, Owner), and data caveats.",
             "parameters": {
                 "type": "object",
                 "properties": {
+                    "search_query": {
+                        "type": ["string", "null"],
+                        "description": "Search keyword to look up a specific company name, deal name (e.g. 'Sakura'), client code (e.g. 'company047'), or owner code."
+                    },
                     "sector_filter": {
                         "type": ["string", "null"],
                         "description": "Optional filter by canonical sector (e.g. 'Mining', 'Renewables', 'Railways', 'Powerline', 'Construction', 'Others')."
@@ -97,10 +102,14 @@ TOOLS_SCHEMA = [
         "type": "function",
         "function": {
             "name": "fetch_work_orders",
-            "description": "Fetches and analyzes live project execution records from the Work Orders board (Work_Order_Tracker_Data), including billing/invoicing status, collected amounts, at-risk work orders (stuck billing, overdue end dates), and operational data caveats.",
+            "description": "Fetches and analyzes live project execution records from the Work Orders board (Work_Order_Tracker_Data). Supports searching specific projects or customers (e.g. 'company047'). Returns billing/invoicing status, collected amounts, matching work order records, at-risk work orders (stuck billing, overdue end dates), and operational data caveats.",
             "parameters": {
                 "type": "object",
                 "properties": {
+                    "search_query": {
+                        "type": ["string", "null"],
+                        "description": "Search keyword to look up a specific project, customer code (e.g. 'company047'), deal name masked, or personnel code."
+                    },
                     "sector_filter": {
                         "type": ["string", "null"],
                         "description": "Optional filter by Sector (e.g. 'Mining', 'Renewables', 'Railways', 'Powerline', 'Construction', 'Others')."
@@ -210,9 +219,20 @@ class FounderBIAgent:
                 meta, raw_items = self._fetch_board_cached(self.deals_board_id)
                 items, report = normalize_deals_data(meta, raw_items)
 
+                search_query = tool_args.get("search_query") or tool_args.get("client_code_filter") or tool_args.get("deal_name_filter")
+                if search_query:
+                    sq = search_query.lower().strip()
+                    items = [
+                        i for i in items
+                        if sq in (i.get("deal_name") or "").lower()
+                        or sq in (i.get("client_code") or "").lower()
+                        or sq in (i.get("owner_code") or "").lower()
+                        or sq in (i.get("sector") or "").lower()
+                    ]
+
                 sector_filter = tool_args.get("sector_filter")
                 if sector_filter:
-                    items = [i for i in items if i["sector"].lower() == sector_filter.lower()]
+                    items = [i for i in items if i.get("sector") and i["sector"].lower() == sector_filter.lower()]
 
                 status_filter = tool_args.get("status_filter")
                 if status_filter:
@@ -248,19 +268,24 @@ class FounderBIAgent:
                     by_sector[sec] = by_sector.get(sec, 0) + 1
                     by_stage[stg] = by_stage.get(stg, 0) + 1
 
-                # Sample records (compact 5 items)
-                clean_sample = [
+                # Clean structured records (with complete attributes: closure probability, stage, values, client)
+                clean_records = [
                     {
                         "deal_name": i.get("deal_name"),
+                        "client_code": i.get("client_code"),
+                        "owner_code": i.get("owner_code"),
                         "deal_status": i.get("deal_status"),
                         "deal_value": i.get("deal_value"),
+                        "closure_probability": i.get("closure_probability"),
                         "deal_stage": i.get("deal_stage"),
-                        "sector": i.get("sector")
+                        "sector": i.get("sector"),
+                        "close_date": i.get("close_date"),
+                        "tentative_close_date": i.get("tentative_close_date")
                     }
-                    for i in items[:5]
+                    for i in items[:25]
                 ]
 
-                return {
+                result_data = {
                     "board_name": meta.get("name"),
                     "total_deals_count": len(items),
                     "win_rate_analysis": {
@@ -278,9 +303,13 @@ class FounderBIAgent:
                     },
                     "sector_breakdown": by_sector,
                     "stage_breakdown": by_stage,
-                    "sample_records": clean_sample,
+                    "sample_records": clean_records[:5],
                     "data_caveats": report.board_caveats[:4]
                 }
+                if search_query or len(items) <= 25:
+                    result_data["matching_records"] = clean_records
+
+                return result_data
 
             elif tool_name == "fetch_work_orders":
                 if not self._is_board_configured(self.work_orders_board_id):
@@ -288,9 +317,20 @@ class FounderBIAgent:
                 meta, raw_items = self._fetch_board_cached(self.work_orders_board_id)
                 items, report = normalize_work_orders_data(meta, raw_items)
 
+                search_query = tool_args.get("search_query") or tool_args.get("customer_filter") or tool_args.get("deal_name_filter")
+                if search_query:
+                    sq = search_query.lower().strip()
+                    items = [
+                        i for i in items
+                        if sq in (i.get("deal_name_masked") or "").lower()
+                        or sq in (i.get("customer_name_code") or "").lower()
+                        or sq in (i.get("bd_kam_personnel_code") or "").lower()
+                        or sq in (i.get("sector") or "").lower()
+                    ]
+
                 sector_filter = tool_args.get("sector_filter")
                 if sector_filter:
-                    items = [i for i in items if i["sector"].lower() == sector_filter.lower()]
+                    items = [i for i in items if i.get("sector") and i["sector"].lower() == sector_filter.lower()]
 
                 billing_status_filter = tool_args.get("billing_status_filter")
                 if billing_status_filter:
@@ -356,7 +396,25 @@ class FounderBIAgent:
                     by_wo_status[wo_st] = by_wo_status.get(wo_st, 0) + 1
                     by_sector[sec] = by_sector.get(sec, 0) + 1
 
-                return {
+                clean_wo_records = [
+                    {
+                        "deal_name": i.get("deal_name_masked"),
+                        "customer": i.get("customer_name_code"),
+                        "sector": i.get("sector"),
+                        "amount_excl_gst": i.get("amount_excl_gst"),
+                        "billed_excl_gst": i.get("billed_excl_gst"),
+                        "collected_incl_gst": i.get("collected_incl_gst"),
+                        "amount_receivable": i.get("amount_receivable"),
+                        "invoice_status": i.get("invoice_status"),
+                        "billing_status": i.get("billing_status"),
+                        "wo_status": i.get("wo_status_billed"),
+                        "probable_start_date": i.get("probable_start_date"),
+                        "probable_end_date": i.get("probable_end_date")
+                    }
+                    for i in items[:25]
+                ]
+
+                result_data = {
                     "board_name": meta.get("name"),
                     "total_work_orders_count": len(items),
                     "financial_totals": {
@@ -379,6 +437,10 @@ class FounderBIAgent:
                     "data_caveats": report.board_caveats[:4],
                     "collection_status_note": "Collection status is 100% empty across all rows (untracked in ops)."
                 }
+                if search_query or len(items) <= 25:
+                    result_data["matching_records"] = clean_wo_records
+
+                return result_data
 
             elif tool_name == "get_data_quality_report":
                 d_meta, d_raw = self._fetch_board_cached(self.deals_board_id)

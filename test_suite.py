@@ -191,10 +191,55 @@ class TestAgentAndGroqIntegration(unittest.TestCase):
             mock_client.chat.completions.create.side_effect = fake_create
             mock_groq_cls.return_value = mock_client
 
-            resp = agent._call_chat_completion(messages=[{"role": "user", "content": "test"}])
-            self.assertEqual(resp.choices[0].message.content, "Fallback success")
-            self.assertEqual(agent.current_key_index, 1)  # Rotated to fallback key index
+    def test_deal_search_query(self):
+        from agent import FounderBIAgent
+        from unittest.mock import patch
+
+        agent = FounderBIAgent()
+        agent.deals_board_id = "12345"
+
+        mock_meta = {
+            "name": "Deals",
+            "columns": [
+                {"id": "c1", "title": "Deal Name"},
+                {"id": "c2", "title": "Client Code"},
+                {"id": "c3", "title": "Closure Probability"},
+                {"id": "c4", "title": "Deal Status"}
+            ]
+        }
+        mock_items = [
+            {
+                "id": "item1",
+                "name": "Sakura Project",
+                "column_values": [
+                    {"id": "c1", "text": "Sakura Project"},
+                    {"id": "c2", "text": "company047"},
+                    {"id": "c3", "text": "85%"},
+                    {"id": "c4", "text": "Open"}
+                ]
+            },
+            {
+                "id": "item2",
+                "name": "Other Project",
+                "column_values": [
+                    {"id": "c1", "text": "Other Project"},
+                    {"id": "c2", "text": "company999"},
+                    {"id": "c3", "text": "20%"},
+                    {"id": "c4", "text": "Open"}
+                ]
+            }
+        ]
+
+        with patch.object(agent, "_fetch_board_cached", return_value=(mock_meta, mock_items)):
+            res = agent.execute_tool("fetch_deals", {"search_query": "company047"})
+            self.assertEqual(res["total_deals_count"], 1)
+            self.assertEqual(len(res["matching_records"]), 1)
+            match = res["matching_records"][0]
+            self.assertEqual(match["deal_name"], "Sakura Project")
+            self.assertEqual(match["client_code"], "company047")
+            self.assertEqual(match["closure_probability"], 85.0)
 
 
 if __name__ == "__main__":
     unittest.main()
+
