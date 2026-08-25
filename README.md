@@ -88,8 +88,8 @@ Fill in your configuration:
 3. The number `1234567890` is your `WORK_ORDERS_BOARD_ID`.
 4. Repeat for your **Deals** board to get `DEALS_BOARD_ID`.
 
-#### C. Groq API Key:
-Get your free API key at [console.groq.com/keys](https://console.groq.com/keys) and set `GROQ_API_KEY`.
+#### C. Groq API Keys (Primary & Fallback):
+Get your free API key at [console.groq.com/keys](https://console.groq.com/keys) and set `GROQ_API_KEY`. You can also set a fallback `GROQ_API_KEY2` which the agent will automatically switch to if the primary key experiences rate limits or API errors.
 
 Example `.env`:
 ```ini
@@ -97,6 +97,7 @@ MONDAY_API_KEY=eyJhbGciOi...
 WORK_ORDERS_BOARD_ID=8123456789
 DEALS_BOARD_ID=8123456790
 GROQ_API_KEY=gsk_...
+GROQ_API_KEY2=gsk_... # Optional fallback key
 # Optional model override (default: llama-3.3-70b-versatile)
 # GROQ_MODEL=llama-3.3-70b-versatile
 ```

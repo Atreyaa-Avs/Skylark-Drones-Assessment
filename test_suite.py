@@ -166,6 +166,35 @@ class TestAgentAndGroqIntegration(unittest.TestCase):
         self.assertIn(agent.provider, ["groq", "unconfigured"])
         self.assertIsNotNone(agent.model_name)
 
+    def test_groq_key_failover_mechanism(self):
+        from agent import FounderBIAgent
+        from unittest.mock import patch, MagicMock
+
+        agent = FounderBIAgent()
+        agent.groq_keys = ["primary_fake_key", "secondary_fake_key"]
+        agent.current_key_index = 0
+
+        # Simulate first key failing with rate limit error, second key succeeding
+        mock_response = MagicMock()
+        mock_response.choices = [MagicMock(message=MagicMock(content="Fallback success", tool_calls=None))]
+
+        call_count = 0
+        def fake_create(**kwargs):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                raise RuntimeError("Rate limit exceeded on primary key")
+            return mock_response
+
+        with patch("groq.Groq") as mock_groq_cls:
+            mock_client = MagicMock()
+            mock_client.chat.completions.create.side_effect = fake_create
+            mock_groq_cls.return_value = mock_client
+
+            resp = agent._call_chat_completion(messages=[{"role": "user", "content": "test"}])
+            self.assertEqual(resp.choices[0].message.content, "Fallback success")
+            self.assertEqual(agent.current_key_index, 1)  # Rotated to fallback key index
+
 
 if __name__ == "__main__":
     unittest.main()

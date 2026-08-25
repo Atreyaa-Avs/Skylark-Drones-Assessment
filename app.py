@@ -113,6 +113,8 @@ async def on_chat_start():
 
         if llm_provider == "unconfigured":
             status_lines.append("> ⚠️ **Notice**: `GROQ_API_KEY` is not set in `.env`. Please add your Groq API key to enable AI reasoning.")
+        elif len(agent.groq_keys) > 1:
+            status_lines.append(f"> 🛡️ **Failover Active**: {len(agent.groq_keys)} Groq API keys configured (Auto-fallback to `GROQ_API_KEY2` if primary key hits rate limits).")
 
         wo_info_str = "❌ Not connected"
         deals_info_str = "❌ Not connected"

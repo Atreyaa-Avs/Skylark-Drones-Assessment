@@ -159,9 +159,18 @@ class FounderBIAgent:
         self._cache_ttl = 120
 
         self.groq_key = os.getenv("GROQ_API_KEY", "")
+        self.groq_key2 = os.getenv("GROQ_API_KEY2", "")
+
+        # Ordered list of candidate Groq API keys for failover / fallback
+        raw_keys = [self.groq_key, self.groq_key2]
+        self.groq_keys: List[str] = [
+            k.strip() for k in raw_keys
+            if k and not k.strip().startswith("your_")
+        ]
+        self.current_key_index: int = 0
         self.model_name = os.getenv("GROQ_MODEL", os.getenv("LLM_MODEL", "llama-3.3-70b-versatile"))
 
-        if self.groq_key and not self.groq_key.startswith("your_"):
+        if self.groq_keys:
             self.provider = "groq"
         else:
             self.provider = "unconfigured"
@@ -431,16 +440,72 @@ class FounderBIAgent:
             logger.exception("Error executing tool")
             return {"error": f"Tool execution failed: {str(exc)}"}
 
+    def _call_chat_completion(
+        self,
+        messages: List[Dict[str, Any]],
+        tools: Optional[List[Dict[str, Any]]] = None,
+        tool_choice: str = "auto",
+        temperature: float = 0.1,
+        progress_callback=None
+    ):
+        """Calls Groq chat completion API with automatic failover to secondary keys on rate limits or API errors."""
+        from groq import Groq
+
+        if not self.groq_keys:
+            raise RuntimeError("No valid Groq API keys configured in .env.")
+
+        start_index = self.current_key_index
+        total_keys = len(self.groq_keys)
+
+        for attempt in range(total_keys):
+            idx = (start_index + attempt) % total_keys
+            active_key = self.groq_keys[idx]
+            masked_key = f"{active_key[:8]}...{active_key[-4:]}" if len(active_key) > 12 else "***"
+
+            try:
+                client = Groq(api_key=active_key)
+                kwargs: Dict[str, Any] = {
+                    "model": self.model_name,
+                    "messages": messages,
+                    "temperature": temperature,
+                }
+                if tools:
+                    kwargs["tools"] = tools
+                    kwargs["tool_choice"] = tool_choice
+
+                response = client.chat.completions.create(**kwargs)
+                # Successful call: update current active key index
+                self.current_key_index = idx
+                return response
+
+            except Exception as exc:
+                err_str = str(exc)
+                logger.warning(
+                    f"Groq API call failed with key #{idx + 1} ({masked_key}): {err_str}"
+                )
+
+                if attempt < total_keys - 1:
+                    next_idx = (start_index + attempt + 1) % total_keys
+                    fallback_label = f"GROQ_API_KEY{next_idx + 1 if next_idx > 0 else ''}"
+                    msg_notice = (
+                        f"⚠️ Groq API key #{idx + 1} encountered an issue ({err_str[:60]}...). "
+                        f"Falling back to `{fallback_label}`..."
+                    )
+                    logger.info(msg_notice)
+                    if progress_callback:
+                        progress_callback(msg_notice)
+                    continue
+                else:
+                    logger.error(f"All configured Groq API keys ({total_keys}) failed.")
+                    raise exc
+
     def run_turn(self, conversation_history: List[Dict[str, Any]], progress_callback=None) -> str:
-        """Runs a multi-turn conversation with Groq tool calling."""
+        """Runs a multi-turn conversation with Groq tool calling and key failover."""
         if self.provider == "unconfigured":
             return (
-                "⚠️ **Groq API Key Missing**: Please configure `GROQ_API_KEY` "
+                "⚠️ **Groq API Key Missing**: Please configure `GROQ_API_KEY` (or `GROQ_API_KEY2`) "
                 "in your `.env` file to enable the BI reasoning agent."
             )
-
-        from groq import Groq
-        client = Groq(api_key=self.groq_key)
 
         groq_msgs: List[Dict[str, Any]] = [{"role": "system", "content": SYSTEM_PROMPT}]
         for m in conversation_history:
@@ -451,13 +516,16 @@ class FounderBIAgent:
         iteration = 0
         while iteration < self.max_tool_iterations:
             iteration += 1
-            response = client.chat.completions.create(
-                model=self.model_name,
-                messages=groq_msgs,
-                tools=TOOLS_SCHEMA,
-                tool_choice="auto",
-                temperature=0.1
-            )
+            try:
+                response = self._call_chat_completion(
+                    messages=groq_msgs,
+                    tools=TOOLS_SCHEMA,
+                    tool_choice="auto",
+                    temperature=0.1,
+                    progress_callback=progress_callback
+                )
+            except Exception as exc:
+                return f"⚠️ **Groq API Error**: {str(exc)}"
 
             choice = response.choices[0]
             msg = choice.message

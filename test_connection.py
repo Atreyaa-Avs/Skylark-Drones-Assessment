@@ -44,13 +44,15 @@ def run_diagnostics():
     wo_board_id = os.getenv("WORK_ORDERS_BOARD_ID", "")
     deals_board_id = os.getenv("DEALS_BOARD_ID", "")
     groq_key = os.getenv("GROQ_API_KEY", "")
+    groq_key2 = os.getenv("GROQ_API_KEY2", "")
     groq_model = os.getenv("GROQ_MODEL", os.getenv("LLM_MODEL", "llama-3.3-70b-versatile"))
 
     env_rows = [
         ["MONDAY_API_KEY", "Set" if (monday_api_key and not monday_api_key.startswith("your_")) else "Missing / Placeholder"],
         ["WORK_ORDERS_BOARD_ID", wo_board_id if wo_board_id else "Not Set"],
         ["DEALS_BOARD_ID", deals_board_id if deals_board_id else "Not Set"],
-        ["GROQ_API_KEY", "Set" if (groq_key and not groq_key.startswith("your_")) else "Not Set"],
+        ["GROQ_API_KEY (Primary)", "Set" if (groq_key and not groq_key.startswith("your_")) else "Not Set"],
+        ["GROQ_API_KEY2 (Fallback)", "Set" if (groq_key2 and not groq_key2.startswith("your_")) else "Not Set"],
         ["GROQ_MODEL", groq_model],
     ]
     print("\n[1] Environment Configuration:")
@@ -118,22 +120,31 @@ def run_diagnostics():
 
     # 4. Check Groq API Connectivity
     print_banner("⚡ [4] Groq LLM API Connection Check")
-    if not groq_key or groq_key.startswith("your_"):
-        print("⚠️ GROQ_API_KEY is not configured in .env.")
-    else:
-        try:
-            from groq import Groq
-            groq_client = Groq(api_key=groq_key)
-            test_resp = groq_client.chat.completions.create(
-                model=groq_model,
-                messages=[{"role": "user", "content": "Respond with 'OK' if you can read this."}],
-                max_tokens=10
-            )
-            reply = test_resp.choices[0].message.content.strip()
-            print(f"✅ Groq API connection successful! Model: {groq_model}")
-            print(f"   Test Response: {reply}")
-        except Exception as e:
-            print(f"❌ Groq API error: {e}")
+    from groq import Groq
+    keys_to_test = [
+        ("GROQ_API_KEY (Primary)", groq_key),
+        ("GROQ_API_KEY2 (Fallback)", groq_key2)
+    ]
+    tested_any = False
+    for label, k in keys_to_test:
+        if k and not k.startswith("your_"):
+            tested_any = True
+            try:
+                groq_client = Groq(api_key=k)
+                test_resp = groq_client.chat.completions.create(
+                    model=groq_model,
+                    messages=[{"role": "user", "content": "Respond with 'OK' if you can read this."}],
+                    max_tokens=10
+                )
+                reply = test_resp.choices[0].message.content.strip()
+                print(f"✅ {label}: Connected! Model: {groq_model} (Response: '{reply}')")
+            except Exception as e:
+                print(f"❌ {label}: Failed -> {e}")
+        else:
+            print(f"ℹ️ {label}: Not configured.")
+
+    if not tested_any:
+        print("⚠️ No valid Groq API keys configured in .env.")
 
     print_banner("✅ Diagnostics Completed")
 
